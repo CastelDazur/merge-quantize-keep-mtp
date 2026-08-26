@@ -1,4 +1,4 @@
-# Weights and build artifacts stay out.
+# Model artifacts, never commit these.
 *.gguf
 *.safetensors
 *.bin

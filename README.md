@@ -9,7 +9,13 @@ Two things here that cost me time and aren't written down much:
 
 Everything is model-family agnostic. The MTP checks look for the tensor names Qwen3-family and DeepSeek-style speculative heads use; adjust the patterns for yours.
 
-This came out of moving a local 27B setup from one Qwen generation to the next. Two adapters trained on the old base had to be carried onto the new one and folded into a single model, with the speculative-decoding heads kept intact through quantization. The steps are generic; only the motivation was mine.
+## Where this came from
+
+I run a 27B model locally as an always-on assistant, and I moved it from Qwen 3.6 to Qwen 3.8.
+
+That upgrade is not a download. Two LoRA adapters had been trained separately against the old base, one for a domain and one for reasoning, and both had to end up inside the new model. Not loaded at runtime as adapters, baked into the weights, because the runtime slot takes one file. On top of that the new base ships multi-token-prediction heads for speculative decoding, and those come from a different release than the weights I was fine-tuning, so they had to be assembled in by hand. Then the whole thing gets quantized to fit 32GB of VRAM.
+
+Each of those steps has a way to go quietly wrong. Adding the adapters instead of concatenating them gives you a model that is subtly worse and never tells you why. Quantizing without checking gives you a model that loads, runs, and has silently lost the speculative heads you did all this for. Both happened to me. The code here is the two checks that stop them.
 
 ## Why rank-concatenation, not addition
 
@@ -82,11 +88,13 @@ pip install -e .
 
 Only dependency is numpy, for the merge math. The GGUF reader is pure standard library.
 
-## What this is not
+## Scope
 
-- Not a full GGUF library. The reader parses the header (metadata + tensor list); it doesn't read tensor data. That's all `verify` needs.
-- Not a trainer or a quantizer. It's the merge step and the check around llama.cpp's quantizer.
-- The MTP tensor-name patterns are for Qwen3-family / DeepSeek-style heads. Other architectures name them differently; edit `SPECULATIVE_PATTERNS` in `gguf.py`.
+The GGUF reader parses the header, meaning metadata and the tensor directory. It never touches tensor data, which is why `verify` is instant on a 20GB file, and also why this is not a general GGUF library.
+
+There is no trainer and no quantizer in here. Training is your business and quantizing is llama.cpp's; this fills the two gaps on either side of it.
+
+The tensor-name patterns match Qwen3-family and DeepSeek-style speculative heads. If your architecture names them something else, `verify` will report MISSING on a perfectly good file. Edit `SPECULATIVE_PATTERNS` in `gguf.py` before you trust it.
 
 ## License
 
