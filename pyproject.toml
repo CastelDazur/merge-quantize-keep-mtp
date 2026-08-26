@@ -1,0 +1,23 @@
+[project]
+name = "merge-kit"
+version = "0.1.0"
+description = "Merge two LoRA adapters by rank-concatenation and verify speculative-decoding (MTP) heads survive GGUF quantization."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "CastelDazur" }]
+keywords = ["lora", "gguf", "quantization", "speculative-decoding", "mtp", "llama-cpp", "local-ai"]
+dependencies = ["numpy>=1.21"]
+
+[project.urls]
+Homepage = "https://github.com/CastelDazur/merge-quantize-keep-mtp"
+
+[project.scripts]
+merge-mtp = "merge_kit.cli:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["merge_kit"]
