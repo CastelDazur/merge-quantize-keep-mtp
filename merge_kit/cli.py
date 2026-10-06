@@ -1,6 +1,6 @@
 """Command line.
 
-  merge-mtp verify model.Q5_K_M.gguf   # check speculative heads survived quant
+  merge-mtp verify model.Q5_K_M.gguf   # check the GGUF has speculative heads
   merge-mtp list   model.gguf          # tensor count + a sample of names
 """
 
@@ -28,9 +28,9 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         print("  OK")
         return 0
     print("  speculative heads: MISSING")
-    print("  This quant dropped the nextn/mtp tensors. Re-quantize at a lower")
-    print("  level (e.g. Q4_K_M) or keep nextn in higher precision. The model")
-    print("  will load and run, but draft speculation will do nothing.")
+    print("  This GGUF has no nextn/mtp tensors. Use a quant that includes them, or")
+    print("  check that the heads were included when the checkpoint was assembled and")
+    print("  converted. The model will load and run, but draft speculation will do nothing.")
     return 1
 
 

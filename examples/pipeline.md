@@ -59,13 +59,13 @@ The MTP heads land as `blk.<n>.nextn.*` in the GGUF.
 llama-quantize model.f16.gguf model.Q5_K_M.gguf Q5_K_M
 ```
 
-## 6. Verify the heads survived (this repo)
+## 6. Verify the heads are in the GGUF (this repo)
 
 ```bash
 merge-mtp verify model.Q5_K_M.gguf
 ```
 
-If it reports MISSING, the quant dropped the speculative tensors. Re-run step 5
-at `Q4_K_M`, or quantize with the nextn tensors pinned to a higher precision,
-then verify again. Don't ship a "speculative" model whose heads were quantized
-away; it runs, it's just not faster.
+If it reports MISSING, the heads did not make it into the file. Check step 3
+(were the MTP tensors included in the assembled checkpoint?) and the conversion,
+then verify again. For a downloaded quant, pick a build that includes them.
+Don't ship a "speculative" model without heads; it runs, it's just not faster.

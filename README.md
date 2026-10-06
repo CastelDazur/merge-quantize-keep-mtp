@@ -1,11 +1,11 @@
 # merge-quantize-keep-mtp
 
-Merge two LoRA adapters into one model, quantize it to GGUF, and verify the speculative-decoding heads survived the quantization.
+Merge two LoRA adapters into one model, quantize it to GGUF, and verify the speculative-decoding (MTP) heads are actually in the file.
 
 Two things here that cost me time and aren't written down much:
 
 1. Merging two adapters trained separately. The naive answer is to add them, and that's wrong when they were trained independently. Rank-concatenation is the right move and it's a one-liner once you see it.
-2. Quantizing a model that has multi-token-prediction (MTP) heads for speculative decoding. Some quant levels silently drop those heads, and you don't find out until draft speculation does nothing at inference. This repo has a GGUF reader that checks, so you catch it at build time instead of wondering why your tokens/sec didn't move.
+2. Making sure a GGUF of a model with multi-token-prediction (MTP) heads still has them. Many published quants of the same model ship without the heads, and a hand-assembled checkpoint can lose them before conversion. Either way the model loads and runs, and you only notice when draft speculation does nothing at inference. This repo has a GGUF reader that checks, so you catch it at build time instead of wondering why your tokens/sec didn't move.
 
 Everything is model-family agnostic. The MTP checks look for the tensor names Qwen3-family and DeepSeek-style speculative heads use; adjust the patterns for yours.
 
@@ -15,7 +15,9 @@ I run a 27B model locally as an always-on assistant, and I moved it from Qwen 3.
 
 That upgrade is not a download. Two LoRA adapters had been trained separately against the old base, one for a domain and one for reasoning, and both had to end up inside the new model. Not loaded at runtime as adapters, baked into the weights, because the runtime slot takes one file. On top of that the new base ships multi-token-prediction heads for speculative decoding, and those come from a different release than the weights I was fine-tuning, so they had to be assembled in by hand. Then the whole thing gets quantized to fit 32GB of VRAM.
 
-Each of those steps has a way to go quietly wrong. Adding the adapters instead of concatenating them gives you a model that is subtly worse and never tells you why. Quantizing without checking gives you a model that loads, runs, and has silently lost the speculative heads you did all this for. Both happened to me. The code here is the two checks that stop them.
+Each of those steps has a way to go quietly wrong. Adding the adapters instead of concatenating them gives you a model that is subtly worse and never tells you why. Picking or building a GGUF without checking can give you a model that loads, runs, and has no speculative heads at all. I nearly shipped one: most of the published Qwen 3.6 27B quants I checked at Q4/Q5/Q6 had no `nextn` tensors in the header, while the build with heads was +39% tokens/sec with MTP drafting on. The code here is the two checks that stop both mistakes.
+
+An honest update: the +39% was on Qwen 3.6. On the current Qwen 3.8 build I did not see a worthwhile gain from MTP drafting for my workload, so my latest quant is built without the heads on purpose. The check is for when you do rely on them: it tells you whether the file you are about to run actually has them.
 
 ## Why rank-concatenation, not addition
 
@@ -38,11 +40,13 @@ from merge_kit.lora_merge import rank_concat
 A, B = rank_concat(A1, B1, A2, B2)   # raises if shapes don't line up
 ```
 
-## Keeping MTP heads through quantization
+## Checking the MTP heads are in the GGUF
 
-MTP heads (the `nextn` / `mtp` tensors) are what let a model draft several tokens ahead and verify them in one pass. They're small, and some quantization paths drop or zero them, so the model still loads and runs, just without the speedup you built it for.
+MTP heads (the `nextn` / `mtp` tensors) are what let a model draft several tokens ahead and verify them in one pass. They're small and optional, so a GGUF without them still loads and runs, just without the speedup. Published quants often leave them out, and if you assemble the checkpoint yourself they come from a separate release and are easy to miss.
 
-The fix is not clever: check. After you quantize, read the GGUF and confirm the speculative tensors are still there.
+The fix is not clever: check. Before you rely on a GGUF, after you download it or after you quantize your own, read the header and confirm the speculative tensors are there.
+
+In my own pipeline `llama-quantize` to Q5_K_M kept all four `blk.64.nextn.*` tensors; the quantization step was never the problem. The check is cheap insurance against picking or building the wrong file.
 
 ```bash
 merge-mtp verify model.Q5_K_M.gguf
@@ -50,15 +54,16 @@ merge-mtp verify model.Q5_K_M.gguf
 ```
 model.Q5_K_M.gguf
   866 tensors
-  speculative heads: FOUND (5 nextn tensors)
+  speculative heads: FOUND (4 nextn/mtp tensors)
   OK
 ```
 
 If they're gone:
 ```
   speculative heads: MISSING
-  Q5 dropped the nextn tensors. Re-quantize at Q4_K_M, or keep nextn in higher
-  precision. This model will load and run but draft speculation will do nothing.
+  This GGUF has no nextn/mtp tensors. Use a quant that includes them, or check
+  that the heads were included when the checkpoint was assembled and converted.
+  The model will load and run, but draft speculation will do nothing.
 ```
 
 `merge_kit/gguf.py` is a small dependency-free GGUF header reader. It parses the metadata and tensor list without loading weights, so `verify` runs in milliseconds on a 20GB file. You can also use it on its own to list what's in any GGUF:
@@ -78,7 +83,7 @@ The steps, in order. Only the merge and the verify are in this repo as code; the
 3. **Assemble** one checkpoint: merged text weights, plus any vision tensors, plus the MTP heads pulled from the speculative-capable release.
 4. **Convert** to GGUF (`convert_hf_to_gguf.py` from llama.cpp).
 5. **Quantize** (`llama-quantize` to Q5_K_M or whatever fits).
-6. **Verify** the MTP heads survived with `merge-mtp verify` (this repo). If missing, drop to Q4_K_M.
+6. **Verify** the MTP heads are in the GGUF with `merge-mtp verify` (this repo). If missing, go back to step 3: the heads did not make it into the assembled checkpoint.
 
 ## Install
 
